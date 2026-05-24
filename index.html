@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Absensi Karyawan</title>
+    <!-- Menggunakan Tailwind CSS untuk styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Animasi sederhana untuk Toast Notifikasi */
+        @keyframes slideIn {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        .toast-enter { animation: slideIn 0.3s ease-out forwards; }
+        .toast-exit { animation: fadeOut 0.5s ease-out forwards; }
+        
+        /* Loading Spinner */
+        .loader {
+            border-top-color: #3498db;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Container Utama -->
+    <div id="app" class="flex-grow flex flex-col">
+        <!-- Tampilan akan di-render di sini oleh JavaScript -->
+    </div>
+
+    <!-- Toast Container untuk Notifikasi -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
+    <!-- Modal Container untuk Pop-up -->
+    <div id="modal-container"></div>
+
+    <script>
+        // ==========================================
+        // KONFIGURASI
+        // ==========================================
+        // GANTI URL DI BAWAH DENGAN URL WEB APP GOOGLE APPS SCRIPT 
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbwlERWBv4TmJNPaqDU-oaXYU_qR-KUxYcJOe5ynKKYIjQeHrODRwvYXrtAgIuy2fiVYSA/exec'; 
+
+        // State Aplikasi
+        let currentUser = null;
+        let isLoading = false;
+
+        // ==========================================
+        // UI COMPONENTS & RENDERERS
+        // ==========================================
+        const appContainer = document.getElementById('app');
+
+        function renderLogin() {
+            appContainer.innerHTML = `
+                <div class="flex items-center justify-center min-h-screen p-4">
+                    <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+                        <div class="text-center mb-8">
+                            <div class="bg-blue-100 text-blue-600 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4"></path></svg>
+                            </div>
+                            <h1 class="text-2xl font-bold text-gray-800">Sistem Absensi</h1>
+                            <p class="text-gray-500 mt-2">Silakan login untuk melanjutkan</p>
+                        </div>
+                        <form id="login-form" onsubmit="handleLogin(event)">
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <input type="text" id="username" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="Masukkan username">
+                            </div>
+                            <div class="mb-6">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                <input type="password" id="password" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="••••••••">
+                            </div>
+                            <button type="submit" id="btn-login" class="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition flex justify-center items-center">
+                                <span>Masuk</span>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderNavbar() {
+            return `
+                <nav class="bg-white shadow-sm border-b px-6 py-4 flex justify-between items-center">
+                    <div class="font-bold text-lg text-blue-600 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        AbsensiApp
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="text-sm font-medium text-gray-600 hidden sm:block">Halo, ${currentUser.nama}</span>
+                        <button onclick="openChangePasswordModal()" class="text-sm bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition font-medium border border-gray-200 hidden sm:block">Ganti Password</button>
+                        <button onclick="logout()" class="text-sm bg-red-50 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-100 transition font-medium">Keluar</button>
+                    </div>
+                </nav>
+            `;
+        }
+
+        function renderPeserta() {
+            appContainer.innerHTML = renderNavbar() + `
+                <main class="flex-grow p-4 md:p-8 max-w-4xl mx-auto w-full">
+                    <div class="bg-white rounded-2xl shadow-sm border p-6 mb-8">
+                        <div class="text-center mb-6">
+                            <h2 class="text-xl font-bold text-gray-800">Panel Absensi</h2>
+                            <p class="text-gray-500 text-sm mt-1">Pastikan GPS perangkat Anda aktif</p>
+                            <div class="text-4xl font-mono font-bold text-blue-600 mt-4" id="realtime-clock">00:00:00</div>
+                            <div class="text-gray-500 text-sm" id="realtime-date">-</div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 max-w-md mx-auto">
+                            <button onclick="submitAbsen('MASUK')" class="col-span-2 bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl shadow transition flex flex-col items-center gap-2">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                                ABSEN MASUK
+                            </button>
+                            <button onclick="submitAbsen('MULAI_ISTIRAHAT')" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow transition text-sm">
+                                MULAI ISTIRAHAT
+                            </button>
+                            <button onclick="submitAbsen('SELESAI_ISTIRAHAT')" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-xl shadow transition text-sm">
+                                SELESAI ISTIRAHAT
+                            </button>
+                            <button onclick="submitAbsen('PULANG')" class="col-span-2 bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-xl shadow transition flex flex-col items-center gap-2 mt-2">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                                ABSEN PULANG
+                            </button>
+                        </div>
+                    </div>
+                </main>
+            `;
+            startClock();
+        }
+
+        function renderAdmin() {
+            appContainer.innerHTML = renderNavbar() + `
+                <main class="flex-grow p-4 md:p-8 max-w-6xl mx-auto w-full">
+                    <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <h2 class="text-2xl font-bold text-gray-800">Rekapitulasi Absensi</h2>
+                    </div>
+
+                    <!-- Filter Section -->
+                    <div class="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap items-end gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Dari Tanggal</label>
+                            <input type="date" id="filter-start" class="border border-gray-300 rounded px-3 py-2 text-sm outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-600 mb-1">Sampai Tanggal</label>
+                            <input type="date" id="filter-end" class="border border-gray-300 rounded px-3 py-2 text-sm outline-none focus:border-blue-500">
+                        </div>
+                        <button onclick="fetchRekap()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded shadow text-sm font-medium transition">
+                            Tampilkan Data
+                        </button>
+                        <button onclick="exportToCSV()" class="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded shadow text-sm font-medium transition ml-auto flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Export CSV
+                        </button>
+                    </div>
+
+                    <!-- Data Table -->
+                    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b text-gray-600 text-xs uppercase font-semibold">
+                                        <th class="p-4">Tanggal</th>
+                                        <th class="p-4">Nama</th>
+                                        <th class="p-4">Masuk</th>
+                                        <th class="p-4">Mulai Istirahat</th>
+                                        <th class="p-4">Selesai Istirahat</th>
+                                        <th class="p-4">Pulang</th>
+                                        <th class="p-4">Lokasi (GPS)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="table-body" class="text-sm divide-y divide-gray-100">
+                                    <tr><td colspan="7" class="p-8 text-center text-gray-500">Silakan klik "Tampilkan Data" untuk memuat rekapitulasi.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </main>
+            `;
+            
+            // Set default dates (Minggu ini)
+            const today = new Date();
+            const lastWeek = new Date(today);
+            lastWeek.setDate(today.getDate() - 7);
+            
+            document.getElementById('filter-end').value = today.toISOString().split('T')[0];
+            document.getElementById('filter-start').value = lastWeek.toISOString().split('T')[0];
+        }
+
+        // ==========================================
+        // LOGIC & API CALLS
+        // ==========================================
+
+        // Sistem Notifikasi Custom (Pengganti Alert)
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let bgColor = 'bg-blue-600';
+            if(type === 'success') bgColor = 'bg-green-600';
+            if(type === 'error') bgColor = 'bg-red-600';
+            if(type === 'warning') bgColor = 'bg-yellow-500';
+
+            toast.className = `${bgColor} text-white px-6 py-3 rounded-lg shadow-lg font-medium text-sm flex items-center justify-between toast-enter min-w-[250px]`;
+            toast.innerHTML = `
+                <span>${message}</span>
+                <button onclick="this.parentElement.remove()" class="ml-4 text-white hover:text-gray-200">&times;</button>
+            `;
+            
+            container.appendChild(toast);
+
+            // Auto remove after 4 seconds
+            setTimeout(() => {
+                if(toast.parentElement) {
+                    toast.classList.remove('toast-enter');
+                    toast.classList.add('toast-exit');
+                    setTimeout(() => toast.remove(), 500);
+                }
+            }, 4000);
+        }
+
+        // Jam Realtime
+        let clockInterval;
+        function startClock() {
+            if(clockInterval) clearInterval(clockInterval);
+            const updateClock = () => {
+                const now = new Date();
+                const timeEl = document.getElementById('realtime-clock');
+                const dateEl = document.getElementById('realtime-date');
+                if(timeEl && dateEl) {
+                    timeEl.innerText = now.toLocaleTimeString('id-ID', { hour12: false });
+                    dateEl.innerText = now.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                }
+            };
+            updateClock();
+            clockInterval = setInterval(updateClock, 1000);
+        }
+
+        function toggleLoading(btnId, isLoadingState) {
+            const btn = document.getElementById(btnId);
+            if(!btn) return;
+            if(isLoadingState) {
+                btn.disabled = true;
+                btn.classList.add('opacity-75', 'cursor-not-allowed');
+                btn.innerHTML = `<div class="loader w-5 h-5 border-2 border-white rounded-full mx-auto"></div>`;
+            } else {
+                btn.disabled = false;
+                btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                // Mengembalikan teks tombol dikendalikan oleh fungsi yang memanggil
+            }
+        }
+
+        // --- API: Login ---
+        async function handleLogin(e) {
+            e.preventDefault();
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            
+            toggleLoading('btn-login', true);
+
+            try {
+                // Melakukan request POST ke Google Apps Script
+                const payload = { action: 'login', username: u, password: p };
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await res.json();
+
+                // Validasi kembalian dari Code.gs
+                if (data.status === 'success' || data.success) {
+                    currentUser = data.data;
+                    showToast(`Selamat datang, ${currentUser.nama}`, 'success');
+                    if(currentUser.role === 'admin') renderAdmin();
+                    else renderPeserta();
+                } else {
+                    showToast(data.message || 'Username atau password salah', 'error');
+                }
+            } catch (err) {
+                showToast("Terjadi kesalahan koneksi ke database", 'error');
+                console.error(err);
+            } finally {
+                toggleLoading('btn-login', false);
+                const btn = document.getElementById('btn-login');
+                if(btn) btn.innerHTML = '<span>Masuk</span>';
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            if(clockInterval) clearInterval(clockInterval);
+            renderLogin();
+            showToast('Anda telah keluar', 'info');
+        }
+
+        // --- FITUR GANTI PASSWORD ---
+        function openChangePasswordModal() {
+            const modalHtml = `
+                <div id="pw-modal" class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 px-4">
+                    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4">Ganti Password</h3>
+                        <form id="form-change-pw" onsubmit="submitChangePassword(event)">
+                            <div class="mb-3">
+                                <label class="block text-sm text-gray-600 mb-1">Password Lama</label>
+                                <input type="password" id="pw-lama" required class="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-blue-500">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm text-gray-600 mb-1">Password Baru</label>
+                                <input type="password" id="pw-baru" required class="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-blue-500">
+                            </div>
+                            <div class="flex justify-end gap-2">
+                                <button type="button" onclick="document.getElementById('pw-modal').remove()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded transition">Batal</button>
+                                <button type="submit" id="btn-submit-pw" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition flex items-center justify-center min-w-[90px]">Simpan</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal-container').innerHTML = modalHtml;
+        }
+
+        async function submitChangePassword(e) {
+            e.preventDefault();
+            const pwLama = document.getElementById('pw-lama').value;
+            const pwBaru = document.getElementById('pw-baru').value;
+            const btn = document.getElementById('btn-submit-pw');
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader w-4 h-4 border-2 border-white rounded-full"></div>';
+
+            const payload = {
+                action: 'change_password',
+                username: currentUser.username,
+                old_password: pwLama,
+                new_password: pwBaru
+            };
+
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if(data.status === 'success' || data.success) {
+                    showToast(data.message, "success");
+                    document.getElementById('pw-modal').remove();
+                } else {
+                    showToast(data.message || "Gagal mengubah password", "error");
+                    btn.disabled = false;
+                    btn.innerHTML = 'Simpan';
+                }
+            } catch (err) {
+                showToast("Terjadi kesalahan sistem", "error");
+                btn.disabled = false;
+                btn.innerHTML = 'Simpan';
+            }
+        }
+
+        // --- API: Absen (Geolocation) ---
+        function submitAbsen(jenisAbsen) {
+            if (!navigator.geolocation) {
+                showToast("Browser Anda tidak mendukung fitur Lokasi/GPS", "error");
+                return;
+            }
+
+            showToast("Mendapatkan lokasi GPS...", "info");
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    
+                    // Format tanggal standar YYYY-MM-DD
+                    const d = new Date();
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+
+                    // Persiapkan data persis seperti yang diharapkan Code.gs
+                    const payload = {
+                        action: 'catat_absen',
+                        username: currentUser.username,
+                        nama: currentUser.nama,
+                        jenis: jenisAbsen.toLowerCase(), 
+                        tanggal: `${year}-${month}-${day}`,
+                        waktu: d.toLocaleTimeString('id-ID', { hour12: false }),
+                        lat: lat,
+                        lng: lng
+                    };
+
+                    showToast("Menyimpan data absensi...", "warning");
+
+                    try {
+                        const res = await fetch(GAS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                            body: JSON.stringify(payload)
+                        });
+                        const data = await res.json();
+
+                        if(data.status === 'success') {
+                            showToast(data.message, "success");
+                        } else {
+                            showToast("Gagal: " + data.message, "error");
+                        }
+                    } catch (err) {
+                        showToast("Terjadi kesalahan sistem saat menyimpan data", "error");
+                    }
+                },
+                (error) => {
+                    let msg = "Gagal mendapatkan lokasi.";
+                    if(error.code === 1) msg = "Akses lokasi ditolak. Harap izinkan GPS pada browser.";
+                    else if(error.code === 2) msg = "Sinyal GPS tidak tersedia.";
+                    else if(error.code === 3) msg = "Waktu pencarian lokasi habis.";
+                    showToast(msg, "error");
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        // --- API: Admin Rekap ---
+        // Variabel global untuk menyimpan data sementara (untuk export)
+        let currentRekapData = [];
+
+        async function fetchRekap() {
+            const start = document.getElementById('filter-start').value;
+            const end = document.getElementById('filter-end').value;
+            const tbody = document.getElementById('table-body');
+            
+            if(!start || !end) {
+                showToast("Pilih rentang tanggal terlebih dahulu", "warning");
+                return;
+            }
+
+            tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-500"><div class="loader w-6 h-6 border-2 border-blue-500 rounded-full mx-auto mb-2"></div>Memuat data...</td></tr>`;
+
+            try {
+                // Melakukan request GET ke Google Apps Script
+                const res = await fetch(`${GAS_URL}?action=get_rekap&start=${start}&end=${end}`);
+                const data = await res.json();
+
+                if(data.status === 'success') {
+                    currentRekapData = data.data; // Simpan untuk fungsi export CSV
+                    if(data.data.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-500">Tidak ada data pada rentang tanggal ini.</td></tr>`;
+                        return;
+                    }
+
+                    tbody.innerHTML = data.data.map(row => {
+                        // Memastikan tampilan tanggal bersih (menghapus format Timezone jika ada)
+                        let tglClean = row.tanggal;
+                        if(tglClean && tglClean.includes('T')) tglClean = tglClean.split('T')[0];
+
+                        return `
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="p-4 whitespace-nowrap">${tglClean}</td>
+                            <td class="p-4 font-medium text-gray-800">${row.nama}</td>
+                            <td class="p-4"><span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">${row.masuk || '-'}</span></td>
+                            <td class="p-4 text-gray-600">${row.istirahat_mulai || '-'}</td>
+                            <td class="p-4 text-gray-600">${row.istirahat_selesai || '-'}</td>
+                            <td class="p-4"><span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs">${row.pulang || '-'}</span></td>
+                            <td class="p-4 text-xs font-mono text-blue-600"><a href="https://maps.google.com/?q=${row.loc_masuk}" target="_blank" class="hover:underline">${row.loc_masuk || '-'}</a></td>
+                        </tr>
+                        `;
+                    }).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">Server Error: ${data.message}</td></tr>`;
+                    showToast(data.message, "error");
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">Gagal memuat data. Periksa koneksi internet Anda.</td></tr>`;
+                showToast("Gagal mengambil rekapitulasi", "error");
+            }
+        }
+
+        function exportToCSV() {
+            if(currentRekapData.length === 0) {
+                showToast("Tidak ada data untuk diekspor", "warning");
+                return;
+            }
+
+            // Buat header CSV
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Tanggal,Nama,Absen Masuk,Mulai Istirahat,Selesai Istirahat,Absen Pulang,Lokasi GPS\n";
+
+            // Tambahkan baris data
+            currentRekapData.forEach(row => {
+                let tglClean = row.tanggal;
+                if(tglClean && tglClean.includes('T')) tglClean = tglClean.split('T')[0];
+
+                const tr = [
+                    tglClean, 
+                    row.nama, 
+                    row.masuk || '', 
+                    row.istirahat_mulai || '', 
+                    row.istirahat_selesai || '', 
+                    row.pulang || '', 
+                    row.loc_masuk || ''
+                ].map(item => `"${item}"`).join(","); // dibungkus quote agar mencegah masalah jika ada tanda koma di dalam string
+                
+                csvContent += tr + "\n";
+            });
+
+            // Eksekusi download file
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `Rekap_Absensi_${document.getElementById('filter-start').value}_sd_${document.getElementById('filter-end').value}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("Berhasil mengunduh CSV", "success");
+        }
+
+        // INISIALISASI AWAL
+        renderLogin();
+
+    </script>
+</body>
+</html>
